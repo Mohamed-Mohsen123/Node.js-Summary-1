@@ -98,3 +98,46 @@ import { greet } from "./greet.js";
 ```
 
 > 💡 ES Modules are the modern standard. Use them for new projects when possible.
+
+---
+ 
+## npm (Node Package Manager)
+ 
+npm is the **standard package manager for Node.js**. It is two things:
+ 
+1. An **online repository** for publishing open-source Node.js projects
+2. A **command-line utility** for package installation, version management, and dependency management
+A plethora of Node.js libraries and applications are published on npm, and many more are added every day.
+ 
+---
+ 
+## Installing Packages: Local vs Global
+ 
+npm allows two methods of installing packages. Choosing the right one depends on whether the package is needed for a specific project or as a system-wide tool.
+ 
+| Feature | Local Install | Global Install |
+|---|---|---|
+| **Command** | `npm install <package>` | `npm install -g <package>` |
+| **Availability** | Only inside the current project | Anywhere on the machine |
+| **Stored in** | `node_modules/` folder in the project | A system-level path |
+| **Tracked in** | `package.json` under `dependencies` | Not tied to any project |
+| **Best used for** | Libraries your project depends on | CLI tools used across projects |
+| **Example** | `express`, `lodash`, `axios` | `nodemon`, `typescript`, `npm` itself |
+ 
+**Local install example:**
+ 
+```bash
+npm install express
+```
+ 
+> Installs `express` into `./node_modules` and adds it to `package.json`.
+ 
+**Global install example:**
+ 
+```bash
+npm install -g nodemon
+```
+ 
+> Installs `nodemon` system-wide — usable from any terminal session, any project.
+ 
+> 💡 As a rule of thumb: if you need to `import` or `require` it in your code → **local**. If you run it as a command in the terminal → **global**.
