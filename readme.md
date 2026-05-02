@@ -100,21 +100,22 @@ import { greet } from "./greet.js";
 > 💡 ES Modules are the modern standard. Use them for new projects when possible.
 
 ---
- 
+
 ## npm (Node Package Manager)
- 
+
 npm is the **standard package manager for Node.js**. It is two things:
- 
+
 1. An **online repository** for publishing open-source Node.js projects
 2. A **command-line utility** for package installation, version management, and dependency management
+
 A plethora of Node.js libraries and applications are published on npm, and many more are added every day.
- 
+
 ---
- 
+
 ## Installing Packages: Local vs Global
- 
+
 npm allows two methods of installing packages. Choosing the right one depends on whether the package is needed for a specific project or as a system-wide tool.
- 
+
 | Feature | Local Install | Global Install |
 |---|---|---|
 | **Command** | `npm install <package>` | `npm install -g <package>` |
@@ -123,21 +124,112 @@ npm allows two methods of installing packages. Choosing the right one depends on
 | **Tracked in** | `package.json` under `dependencies` | Not tied to any project |
 | **Best used for** | Libraries your project depends on | CLI tools used across projects |
 | **Example** | `express`, `lodash`, `axios` | `nodemon`, `typescript`, `npm` itself |
- 
+
 **Local install example:**
- 
+
 ```bash
 npm install express
 ```
- 
+
 > Installs `express` into `./node_modules` and adds it to `package.json`.
- 
+
 **Global install example:**
- 
+
 ```bash
 npm install -g nodemon
 ```
- 
+
 > Installs `nodemon` system-wide — usable from any terminal session, any project.
- 
+
 > 💡 As a rule of thumb: if you need to `import` or `require` it in your code → **local**. If you run it as a command in the terminal → **global**.
+
+---
+
+## Synchronous vs Asynchronous Execution
+
+Node.js runs on a **single main thread**. How you write code — synchronous or asynchronous — determines whether that thread gets blocked or stays free to handle other work.
+
+---
+
+### Synchronous (Blocking)
+
+Code executes **line-by-line**. Each line must finish before the next one starts.
+
+```js
+const fs = require('fs');
+
+console.log('first');
+const data = fs.readFileSync('/path/to/file'); // ⛔ blocks here
+console.log(data);
+console.log('second');
+
+// Output: first → file content → second
+```
+
+---
+
+### Asynchronous (Non-Blocking)
+
+Code **offloads heavy tasks** to the background and moves on immediately.
+
+```js
+const fs = require('fs');
+
+console.log('first');
+fs.readFile('/path/to/file', (err, data) => {
+  console.log(data); // runs later, once file is ready
+});
+console.log('second');
+
+// Output: first → second → file content
+```
+
+---
+
+### Comparison
+
+| | Synchronous (Blocking) | Asynchronous (Non-Blocking) |
+|---|---|---|
+| **Execution** | Line-by-line, waits for each task | Starts task, moves on immediately |
+| **Main thread** | ⛔ Blocked during heavy tasks | ✅ Free to handle other work |
+| **Performance** | Degrades under load | Scales well with many requests |
+| **Heavy tasks stacked** | Times multiply (sequential) | Run concurrently |
+| **Use case** | Simple scripts, startup config | Servers, DB queries, file I/O, APIs |
+| **Example** | `fs.readFileSync()` | `fs.readFile()` + callback |
+
+---
+
+### How Async Works Under the Hood
+
+When Node.js hits an async operation, it doesn't wait — it delegates:
+
+```
+Your JS Code
+     ↓
+Async operation encountered
+     ↓
+Delegated to libuv
+     ↓
+  ┌──────────────────────────────────┐
+  │  Heavy CPU tasks (file, crypto)  │ → Thread Pool
+  │  Network operations              │ → OS Kernel
+  └──────────────────────────────────┘
+     ↓
+Task completes in background
+     ↓
+Callback added to Event Loop queue
+     ↓
+Your callback runs
+```
+
+---
+
+### Why Node.js Is Built This Way
+
+| Traditional Servers | Node.js |
+|---|---|
+| New thread per request | Single main thread for all requests |
+| High memory usage at scale | Low memory footprint |
+| Blocking is acceptable (isolated threads) | Blocking is critical to avoid — it freezes everything |
+
+> 💡 Because Node.js serves **all users on one thread**, a single blocking operation can freeze the entire application. Async code keeps the Event Loop free to accept thousands of simultaneous connections without ever getting stuck.
