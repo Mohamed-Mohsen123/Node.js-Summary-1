@@ -233,3 +233,174 @@ Your callback runs
 | Blocking is acceptable (isolated threads) | Blocking is critical to avoid — it freezes everything |
 
 > 💡 Because Node.js serves **all users on one thread**, a single blocking operation can freeze the entire application. Async code keeps the Event Loop free to accept thousands of simultaneous connections without ever getting stuck.
+
+---
+ 
+## libuv & The Event Loop
+ 
+### What is libuv?
+ 
+**libuv** is a multi-platform C library focused entirely on managing asynchronous I/O operations. It was originally built to power Node.js, but proved so effective that other languages like Julia use it too.
+ 
+libuv is the internal engine that lets Node.js bypass the single-thread limitation. When Node.js hits a blocking task, it offloads the work to libuv, which handles it through two distinct paths:
+ 
+---
+ 
+### How libuv Handles Tasks
+ 
+```
+Node.js encounters a task
+          ↓
+    Is it blocking?
+    ┌─────┴──────┐
+   Yes            No
+    ↓              ↓
+Offload to      Execute on
+  libuv         main thread
+    ↓
+  ┌───────────────────────────────────────────┐
+  │                  libuv                    │
+  │                                           │
+  │   File I/O, CPU tasks    Network I/O      │
+  │   (crypto, compression)  (HTTP, sockets)  │
+  │          ↓                    ↓           │
+  │     Thread Pool          OS Kernel        │
+  │    (4 threads default)   (epoll / kqueue  │
+  │    (max 1024 threads)     / IOCP)         │
+  └───────────────────────────────────────────┘
+          ↓                    ↓
+     Task completes       Task completes
+          ↓                    ↓
+        Callback pushed to Event Loop queue
+                    ↓
+          Executed on main JS thread
+```
+ 
+---
+ 
+### libuv Internal Architecture
+ 
+```
+┌─────────────────────────────────────────────────────────┐
+│                         libuv                           │
+│                                                         │
+│  ┌──────────────────────────────┐  ┌────┐ ┌───┐ ┌────┐ │
+│  │         Network I/O          │  │File│ │DNS│ │User│ │
+│  │  ┌─────┬─────┬─────┬──────┐ │  │ IO │ │Ops│ │code│ │
+│  │  │ TCP │ UDP │ TTY │ Pipe │ │  └────┘ └───┘ └────┘ │
+│  │  └─────┴─────┴─────┴──────┘ │                       │
+│  └──────────────────────────────┘                       │
+│                                                         │
+│  ┌─────────────────────┐  ┌──────┐  ┌───────────────┐  │
+│  │      uv__io_t       │  │      │  │               │  │
+│  │  epoll │ kqueue     │  │ IOCP │  │  Thread Pool  │  │
+│  │  event ports        │  │      │  │  (default: 4) │  │
+│  └─────────────────────┘  └──────┘  └───────────────┘  │
+│   Linux/macOS (async I/O)  Windows   File/CPU tasks     │
+└─────────────────────────────────────────────────────────┘
+```
+ 
+| Mechanism | OS | Used for |
+|---|---|---|
+| `epoll` | Linux | Network I/O |
+| `kqueue` | macOS | Network I/O |
+| `IOCP` | Windows | Network I/O |
+| Thread Pool | All platforms | File I/O, DNS, crypto, user code |
+ 
+---
+ 
+### Thread Pool
+ 
+| Property | Detail |
+|---|---|
+| **Default threads** | 4 |
+| **Max threads** | 1,024 (via env variable) |
+| **Real limit** | Physical CPU cores on your machine |
+| **Used for** | File I/O, cryptography, DNS lookups, CPU-heavy tasks |
+ 
+> ⚠️ Increasing thread count beyond your CPU core count won't improve performance — tasks just share the same physical resources. This is why Node.js is generally not recommended for extremely CPU-bound applications.
+ 
+---
+ 
+### The Event Loop (Basic Architecture)
+ 
+The Event Loop is the central orchestrator living inside libuv. It connects four components:
+ 
+```
+┌─────────────┐        ┌──────────────────────┐
+│             │        │   Node APIs /        │
+│  Call Stack │───────>│   Background Tasks   │
+│   (LIFO)    │        │   (libuv / OS)       │
+│             │        └──────────┬───────────┘
+└──────┬──────┘                   │
+       │                          ↓
+       │                 ┌──────────────────┐
+       │                 │  Callback Queue  │
+       │                 │     (FIFO)       │
+       │                 └────────┬─────────┘
+       │                          │
+       └──────────────────────────┘
+                    ↑
+              Event Loop
+         (checks if call stack
+          is empty, then pushes
+          next callback onto it)
+```
+ 
+---
+ 
+### The Event Loop Phases (Advanced)
+ 
+```
+  index.js starts
+       ↓
+┌─────────────────────┐   ← checked before EVERY phase
+│   Microtask Queue   │     process.nextTick() first
+│   (highest priority)│     then settled Promises
+└──────────┬──────────┘
+           ↓
+┌──────────────────┐
+│  1. Timers       │  setTimeout() / setInterval()
+└────────┬─────────┘
+         ↓ (microtask queue checked again)
+┌──────────────────┐
+│  2. I/O Queue    │  pending I/O callbacks
+└────────┬─────────┘
+         ↓ (microtask queue checked again)
+┌──────────────────┐
+│  3. Idle/Prepare │  internal use only
+└────────┬─────────┘
+         ↓ (microtask queue checked again)
+┌──────────────────┐
+│  4. I/O Polling  │  wait for new I/O events
+└────────┬─────────┘
+         ↓ (microtask queue checked again)
+┌──────────────────┐
+│  5. Check Queue  │  setImmediate() callbacks
+└────────┬─────────┘
+         ↓ (microtask queue checked again)
+┌──────────────────┐
+│  6. Close        │  socket/stream close events
+│     Callbacks    │
+└────────┬─────────┘
+         ↓
+  Pending work left?
+  ┌───────┴───────┐
+ Yes              No
+  ↓               ↓
+Next tick     Process exits
+```
+ 
+### Event Loop Phases — Summary Table
+ 
+| Priority | Phase | What runs |
+|---|---|---|
+| 🔴 Highest | **Microtask Queue** | `process.nextTick()` → then Promises |
+| 1 | **Timers** | `setTimeout()`, `setInterval()` |
+| 2 | **Pending Callbacks** | Deferred I/O callbacks from last iteration |
+| 3 | **Idle / Prepare** | Internal only |
+| 4 | **I/O Polling** | New I/O results (file reads, HTTP responses) |
+| 5 | **Check** | `setImmediate()` |
+| 6 | **Close Callbacks** | `socket.on('close', ...)` |
+ 
+> 💡 The Microtask Queue is checked and fully emptied **between every phase**. This gives `process.nextTick()` and Promises higher priority than any main phase callback.
